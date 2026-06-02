@@ -761,7 +761,7 @@ const CONFIG = {
     appId: "1:890001763394:web:b6f649f5b3ec25c7ae11db"
   }
 };
-const ADMIN_PIN_DEFAULT = "1234";
+const ADMIN_PIN_DEFAULT = "1234"; // PIN เริ่มต้น (เปลี่ยนได้จากหน้าตั้งค่า)
 
 /* ============================================================
    ชนิดของแท็บ -> วิธีแสดงผล (kind) และที่เก็บข้อมูล (store)
@@ -796,7 +796,10 @@ const Store = {
   mem: { docs:{}, cols:{personnel:[],forms:[],news:[],tabs:[],items:[],linkitems:[]}, n:0 },
 
   async getDoc(path){
-    if(this.mode==='firestore'){ const s=await db.doc(path).get(); return s.exists?s.data():null; }
+    if(this.mode==='firestore'){
+      try { const s=await db.doc(path).get(); return s.exists?s.data():null; }
+      catch(e){ console.warn('Store.getDoc('+path+') failed, using null', e); return null; }
+    }
     return this.mem.docs[path] ? {...this.mem.docs[path]} : null;
   },
   async setDoc(path,data){
@@ -804,7 +807,10 @@ const Store = {
     this.mem.docs[path] = {...(this.mem.docs[path]||{}),...data};
   },
   async listCol(name){
-    if(this.mode==='firestore'){ const s=await db.collection(name).get(); return s.docs.map(d=>({id:d.id,...d.data()})); }
+    if(this.mode==='firestore'){
+      try { const s=await db.collection(name).get(); return s.docs.map(d=>({id:d.id,...d.data()})); }
+      catch(e){ console.warn('Store.listCol('+name+') failed, using []', e); return []; }
+    }
     return (this.mem.cols[name]||[]).map(x=>({...x}));
   },
   async addCol(name,data){
@@ -838,7 +844,8 @@ const $ = s => document.querySelector(s);
 
 /* ---------- ค่าเริ่มต้น + seed ครั้งแรก ---------- */
 async function loadSite(){
-  SITE = await Store.getDoc('config/site') || {};
+  try { SITE = await Store.getDoc('config/site') || {}; }
+  catch(e) { console.warn('loadSite: Firestore unavailable, using defaults', e); SITE = {}; }
   // ค่าตั้งต้นถ้ายังว่าง
   SITE.name    = SITE.name    || 'กลุ่มบริหารวิชาการ';
   SITE.school  = SITE.school  || 'โรงเรียนของเรา';

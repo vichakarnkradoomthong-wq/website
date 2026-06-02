@@ -752,6 +752,9 @@ body.editing .card .photo{min-height:90px}
    (ถ้าปล่อยว่าง เว็บจะรันใน "โหมดสาธิต" ด้วยข้อมูลตัวอย่างทันที)
    ============================================================ */
 const CONFIG = {
+  // ★★★ แก้เฉพาะก้อนนี้ก้อนเดียวต่อโรงเรียน ★★★
+  // วาง Firebase config ของคุณที่นี่ (Project settings > Your apps)
+  // ถ้าปล่อยว่าง เว็บจะรันใน "โหมดสาธิต" ทันที
   firebaseConfig: {
     apiKey: "AIzaSyAoXmTjhGiginAL2VjsXmrY_HDy6NVKyL4",
     authDomain: "vichakarnwebsite.firebaseapp.com",
@@ -760,8 +763,10 @@ const CONFIG = {
     messagingSenderId: "890001763394",
     appId: "1:890001763394:web:b6f649f5b3ec25c7ae11db"
   }
+  // หมายเหตุ: โฟลเดอร์ Drive / Apps Script URL / Sheet ID / PIN
+  // ไม่ต้องแก้ในโค้ดแล้ว — ไปกรอกที่ "โหมดผู้ดูแล > ตั้งค่า" (เก็บใน Firestore)
 };
-const ADMIN_PIN_DEFAULT = "1234"; // PIN เริ่มต้น (เปลี่ยนได้จากหน้าตั้งค่า)
+const ADMIN_PIN_DEFAULT = "1234"; // PIN เริ่มต้นครั้งแรก (เปลี่ยนได้จากหน้าตั้งค่า)
 
 /* ============================================================
    ชนิดของแท็บ -> วิธีแสดงผล (kind) และที่เก็บข้อมูล (store)
@@ -795,39 +800,58 @@ const Store = {
   mode: (HAS_FB && db) ? 'firestore' : 'memory',
   mem: { docs:{}, cols:{personnel:[],forms:[],news:[],tabs:[],items:[],linkitems:[]}, n:0 },
 
+  // เมื่อ Firestore พัง (Rules ยังไม่ตั้ง / network error) ให้ fallback ลง memory
+  // แทนที่จะคืน null/[] เงียบๆ ซึ่งทำให้ loadTabs() พยายามเขียนแต่ก็พัง → ไม่มีแท็บ
+  _fallback(e, ret){ console.warn('[Store] Firestore error → fallback memory:', e?.code||e?.message||e); this.mode='memory'; return ret; },
+
   async getDoc(path){
     if(this.mode==='firestore'){
-      try { const s=await db.doc(path).get(); return s.exists?s.data():null; }
-      catch(e){ console.warn('Store.getDoc('+path+') failed, using null', e); return null; }
+      try{ const s=await db.doc(path).get(); return s.exists?s.data():null; }
+      catch(e){ return this._fallback(e, null); }
     }
     return this.mem.docs[path] ? {...this.mem.docs[path]} : null;
   },
   async setDoc(path,data){
-    if(this.mode==='firestore'){ await db.doc(path).set(data,{merge:true}); return; }
+    if(this.mode==='firestore'){
+      try{ await db.doc(path).set(data,{merge:true}); return; }
+      catch(e){ this._fallback(e); }
+    }
     this.mem.docs[path] = {...(this.mem.docs[path]||{}),...data};
   },
   async listCol(name){
     if(this.mode==='firestore'){
-      try { const s=await db.collection(name).get(); return s.docs.map(d=>({id:d.id,...d.data()})); }
-      catch(e){ console.warn('Store.listCol('+name+') failed, using []', e); return []; }
+      try{ const s=await db.collection(name).get(); return s.docs.map(d=>({id:d.id,...d.data()})); }
+      catch(e){ return this._fallback(e, []); }
     }
     return (this.mem.cols[name]||[]).map(x=>({...x}));
   },
   async addCol(name,data){
-    if(this.mode==='firestore'){ const r=await db.collection(name).add(data); return r.id; }
+    if(this.mode==='firestore'){
+      try{ const r=await db.collection(name).add(data); return r.id; }
+      catch(e){ this._fallback(e); }
+    }
     const id='m'+(++this.mem.n); (this.mem.cols[name]=this.mem.cols[name]||[]).push({id,...data}); return id;
   },
   async setColDoc(name,id,data){
-    if(this.mode==='firestore'){ await db.collection(name).doc(id).set(data,{merge:true}); return; }
+    if(this.mode==='firestore'){
+      try{ await db.collection(name).doc(id).set(data,{merge:true}); return; }
+      catch(e){ this._fallback(e); }
+    }
     const a=this.mem.cols[name]=this.mem.cols[name]||[]; const i=a.findIndex(x=>x.id===id);
     if(i>=0)a[i]={...a[i],...data}; else a.push({id,...data});
   },
   async updateCol(name,id,data){
-    if(this.mode==='firestore'){ await db.collection(name).doc(id).update(data); return; }
+    if(this.mode==='firestore'){
+      try{ await db.collection(name).doc(id).update(data); return; }
+      catch(e){ this._fallback(e); }
+    }
     const a=this.mem.cols[name]||[]; const i=a.findIndex(x=>x.id===id); if(i>=0)a[i]={...a[i],...data};
   },
   async removeCol(name,id){
-    if(this.mode==='firestore'){ await db.collection(name).doc(id).delete(); return; }
+    if(this.mode==='firestore'){
+      try{ await db.collection(name).doc(id).delete(); return; }
+      catch(e){ this._fallback(e); }
+    }
     this.mem.cols[name]=(this.mem.cols[name]||[]).filter(x=>x.id!==id);
   }
 };
@@ -844,8 +868,7 @@ const $ = s => document.querySelector(s);
 
 /* ---------- ค่าเริ่มต้น + seed ครั้งแรก ---------- */
 async function loadSite(){
-  try { SITE = await Store.getDoc('config/site') || {}; }
-  catch(e) { console.warn('loadSite: Firestore unavailable, using defaults', e); SITE = {}; }
+  SITE = await Store.getDoc('config/site') || {};
   // ค่าตั้งต้นถ้ายังว่าง
   SITE.name    = SITE.name    || 'กลุ่มบริหารวิชาการ';
   SITE.school  = SITE.school  || 'โรงเรียนของเรา';
@@ -2658,11 +2681,19 @@ window.addEventListener('resize',()=>{ clearTimeout(mqResizeTimer);
   mqResizeTimer=setTimeout(()=>initMarquees($('#main')||document),200); });
 
 (async function init(){
+  // โหมดสาธิต: ยังไม่ได้ใส่ config หรือ Firebase init ไม่สำเร็จ
   if(Store.mode==='memory'){
     seedDemo();
     const s=$('#status'); s.textContent='⚠️ โหมดสาธิต: ยังไม่ได้ใส่ Firebase config — ข้อมูลจะไม่ถูกบันทึกถาวร'; s.classList.add('show');
   }
   await loadSite();
+  // ตรวจหลัง loadSite: ถ้า fallback ลง memory กลางคัน (Firestore Rules ยังไม่พร้อม)
+  if(HAS_FB && Store.mode==='memory'){
+    seedDemo();
+    const s=$('#status');
+    s.textContent='⚠️ เชื่อมต่อ Firestore ไม่ได้ (Rules อาจยังไม่ได้ตั้งค่า) — กำลังแสดงในโหมดสาธิต ข้อมูลจะไม่ถูกบันทึกถาวร';
+    s.classList.add('show');
+  }
   applyTheme();
   await loadTabs();
   activeTab=TABS[0]||null;

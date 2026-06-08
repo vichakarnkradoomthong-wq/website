@@ -316,7 +316,8 @@ body.editing #editbar{display:block}
 
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);
   background:var(--ink);color:#fff;padding:11px 20px;border-radius:999px;font-size:14px;
-  opacity:0;transition:.3s;z-index:80}
+  opacity:0;transition:.3s;z-index:80;max-width:min(92vw,620px);text-align:center;line-height:1.5}
+.toast.warn{background:#b94a00}
 .toast.show{opacity:1;transform:translateX(-50%)}
 
 /* ============================================================
@@ -844,16 +845,17 @@ const CONFIG = {
   // วาง Firebase config ของคุณที่นี่ (Project settings > Your apps)
   // ถ้าปล่อยว่าง เว็บจะรันใน "โหมดสาธิต" ทันที
   firebaseConfig: {
-    apiKey: "AIzaSyAoXmTjhGiginAL2VjsXmrY_HDy6NVKyL4",
-    authDomain: "vichakarnwebsite.firebaseapp.com",
-    projectId: "vichakarnwebsite",
-    storageBucket: "vichakarnwebsite.firebasestorage.app",
-    messagingSenderId: "890001763394",
-    appId: "1:890001763394:web:b6f649f5b3ec25c7ae11db"
+    apiKey: "AIzaSyDyTCj8LDm1Zlh6Pys13DGN4A0YSBOXeaw",
+    authDomain: "ktwvichakarn-d42b9.firebaseapp.com",
+    projectId: "ktwvichakarn-d42b9",
+    storageBucket: "ktwvichakarn-d42b9.firebasestorage.app",
+    messagingSenderId: "677165915334",
+    appId: "1:677165915334:web:e850eb7ea148dacd20cbc7"
   }
   // หมายเหตุ: โฟลเดอร์ Drive / Apps Script URL / Sheet ID / PIN
   // ไม่ต้องแก้ในโค้ดแล้ว — ไปกรอกที่ "โหมดผู้ดูแล > ตั้งค่า" (เก็บใน Firestore)
 };
+const ADMIN_PIN_DEFAULT = "1234"; // PIN เริ่มต้นครั้งแรก (เปลี่ยนได้จากหน้าตั้งค่า)
 const ADMIN_PIN_DEFAULT = "1234"; // PIN เริ่มต้นครั้งแรก (เปลี่ยนได้จากหน้าตั้งค่า)
 
 /* ============================================================
@@ -888,9 +890,23 @@ const Store = {
   mode: (HAS_FB && db) ? 'firestore' : 'memory',
   mem: { docs:{}, cols:{personnel:[],forms:[],news:[],tabs:[],items:[],linkitems:[]}, n:0 },
 
+  _writeError: false,   // flag — เพิ่งมี write error ครั้งนี้ (แสดง toast ครั้งเดียว)
   // เมื่อ Firestore พัง (Rules ยังไม่ตั้ง / network error) ให้ fallback ลง memory
   // แทนที่จะคืน null/[] เงียบๆ ซึ่งทำให้ loadTabs() พยายามเขียนแต่ก็พัง → ไม่มีแท็บ
-  _fallback(e, ret){ console.warn('[Store] Firestore error → fallback memory:', e?.code||e?.message||e); this.mode='memory'; return ret; },
+  _fallback(e, ret){
+    const code=e?.code||e?.message||String(e);
+    const wasFs=(this.mode==='firestore');
+    console.warn('[Store] Firestore error → fallback memory:', code);
+    this.mode='memory';
+    // แจ้งเตือน admin เฉพาะ write error (ที่ทำให้ข้อมูลหาย) ครั้งแรกที่เกิดขึ้น
+    if(wasFs && !this._writeError){
+      this._writeError=true;
+      setTimeout(()=>{ if(typeof toast==='function')
+        toast('⚠️ Firestore เขียนไม่ได้ ('+code+') — ข้อมูลอยู่ใน memory เท่านั้น รีเฟรชแล้วหาย! กรุณาตรวจ Firestore Security Rules',true);
+      },200);
+    }
+    return ret;
+  },
 
   async getDoc(path){
     if(this.mode==='firestore'){
@@ -916,7 +932,7 @@ const Store = {
   async addCol(name,data){
     if(this.mode==='firestore'){
       try{ const r=await db.collection(name).add(data); return r.id; }
-      catch(e){ this._fallback(e); }
+      catch(e){ this._fallback(e); /* fall-through → บันทึกใน memory แทน */ }
     }
     const id='m'+(++this.mem.n); (this.mem.cols[name]=this.mem.cols[name]||[]).push({id,...data}); return id;
   },
@@ -1282,7 +1298,7 @@ async function renderCards(m){
   if(editing){
     $('#addCard').onclick=()=>cardForm(col,null);
     m.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>cardForm(col,items.find(x=>x.id===b.dataset.edit)));
-    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del));
+    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del,items.find(x=>x.id===b.dataset.del)));
     m.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>moveBlock(col,ids.slice(),b.dataset.up,-1));
     m.querySelectorAll('[data-down]').forEach(b=>b.onclick=()=>moveBlock(col,ids.slice(),b.dataset.down,1));
   }
@@ -1349,9 +1365,9 @@ async function renderLinks(m){
     $('#addLink').onclick=()=>linkForm(col,null);
     $('#addFile').onclick=()=>fileForm('fileitems',null);
     m.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>linkForm(col,items.find(x=>x.id===b.dataset.edit)));
-    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del));
+    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del,items.find(x=>x.id===b.dataset.del)));
     m.querySelectorAll('[data-fedit]').forEach(b=>b.onclick=()=>fileForm('fileitems',files.find(x=>x.id===b.dataset.fedit)));
-    m.querySelectorAll('[data-fdel]').forEach(b=>b.onclick=()=>confirmDel('fileitems',b.dataset.fdel));
+    m.querySelectorAll('[data-fdel]').forEach(b=>b.onclick=()=>confirmDel('fileitems',b.dataset.fdel,files.find(x=>x.id===b.dataset.fdel)));
   }
 }
 
@@ -1418,7 +1434,7 @@ async function renderFiles(m){
   if(editing){
     $('#addFile').onclick=()=>fileForm(col,null);
     m.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>fileForm(col,items.find(x=>x.id===b.dataset.edit)));
-    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del));
+    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del,items.find(x=>x.id===b.dataset.del)));
   }
 }
 
@@ -1483,7 +1499,7 @@ async function renderNews(m){
   if(editing){
     $('#addNews').onclick=()=>newsForm(col,null);
     m.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>newsForm(col,items.find(x=>x.id===b.dataset.edit)));
-    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del));
+    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del,items.find(x=>x.id===b.dataset.del)));
   }
 }
 
@@ -1678,7 +1694,7 @@ async function renderBlocks(m, col, opts){
     const el=$('#editLegacy'); if(el && opts.legacyPath) el.onclick=()=>editContentBlock(opts.legacyPath,(legacy&&legacy.html)||'');
     $('#addBlock').onclick=()=>blockForm(col,null,HOME_TYPES);
     m.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>blockForm(col,blocks.find(x=>x.id===b.dataset.edit),HOME_TYPES));
-    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del));
+    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>confirmDel(col,b.dataset.del,blocks.find(x=>x.id===b.dataset.del)));
     const ids=blocks.map(x=>x.id);
     m.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>moveBlock(col,ids.slice(),b.dataset.up,-1));
     m.querySelectorAll('[data-down]').forEach(b=>b.onclick=()=>moveBlock(col,ids.slice(),b.dataset.down,1));
@@ -1775,7 +1791,7 @@ async function renderGallery(m){
   if(editing){
     $('#addGal').onclick=()=>blockForm(col,null,GALLERY_TYPES);
     m.querySelectorAll('[data-edit]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();blockForm(col,items.find(x=>x.id===b.dataset.edit),GALLERY_TYPES);});
-    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();confirmDel(col,b.dataset.del);});
+    m.querySelectorAll('[data-del]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();confirmDel(col,b.dataset.del,items.find(x=>x.id===b.dataset.del));});
   }
 }
 function galleryTileHtml(it,ed){
@@ -1956,7 +1972,7 @@ function blockForm(col,item,types){
         data.photos=pairs.map(p=>p[0]); data.links=pairs.map(p=>p[1]);
       }else if(data.mediaType==='embed'){ data.embed=$('#blk_embed')?$('#blk_embed').value.trim():''; }
     }
-    await saveItem(col,item,data); closeModal(); renderMain(); toast('บันทึกแล้ว');
+    const _ok=await saveItem(col,item,data); closeModal(); renderMain(); toast(_ok?'บันทึกแล้ว ✓':'⚠️ บันทึกใน memory เท่านั้น รีเฟรชแล้วหาย!',!_ok);
   };
 }
 function renderBlockFields(type,it){
@@ -2133,12 +2149,12 @@ function imgField(id,val,label){
     <div class="hint">เลือกไฟล์เพื่ออัปโหลดขึ้น Google Drive (ต้องตั้งค่า GAS) หรือวางลิงก์รูปเอง</div>
   </div>`;
 }
-function bindUpload(id){
+function bindUpload(id,prefixWord){
   const f=$('#'+id+'_file'); if(!f) return;
   f.onchange=async()=>{
     if(!f.files[0]) return;
     toast('กำลังอัปโหลด...');
-    const url=await uploadImage(f.files[0]);
+    const url=await uploadImage(f.files[0],null,prefixWord);
     if(url){ const inp=$('#'+id); inp.value=url; const t=$('#'+id+'_thumb'); t.src=normImg(url); t.style.display='block';
       inp.dispatchEvent(new Event('input')); toast('อัปโหลดสำเร็จ'); }
   };
@@ -2177,7 +2193,7 @@ function cardForm(col,item){
       link:$('#c_link').value.trim(), linkMode:$('#c_linkmode').value,
       linkLabel:$('#c_linklabel').value.trim(),
       order:it.order||Date.now(), tabId:activeTab.id};
-    await saveItem(col,item,data); closeModal(); renderMain(); toast('บันทึกแล้ว');
+    const _ok=await saveItem(col,item,data); closeModal(); renderMain(); toast(_ok?'บันทึกแล้ว ✓':'⚠️ บันทึกใน memory เท่านั้น รีเฟรชแล้วหาย!',!_ok);
   };
 }
 /* ----- ฟอร์มลิงก์ ----- */
@@ -2195,7 +2211,7 @@ function linkForm(col,item){
     const data={title:$('#l_title').value.trim(),desc:$('#l_desc').value.trim(),
       url:$('#l_url').value.trim(),embed:$('#l_embed').value.trim(),
       order:it.order||Date.now(), tabId:activeTab.id};
-    await saveItem(col,item,data); closeModal(); renderMain(); toast('บันทึกแล้ว');
+    const _ok=await saveItem(col,item,data); closeModal(); renderMain(); toast(_ok?'บันทึกแล้ว ✓':'⚠️ บันทึกใน memory เท่านั้น รีเฟรชแล้วหาย!',!_ok);
   };
 }
 /* ----- ฟอร์มเอกสาร/ไฟล์ ----- */
@@ -2229,7 +2245,7 @@ function fileForm(col,item){
       fileType:$('#fl_type').value.trim(),
       fileSize:Number($('#fl_size').value)||0,
       order:it.order||Date.now(), tabId:activeTab.id};
-    await saveItem(col,item,data); closeModal(); renderMain(); toast('บันทึกแล้ว');
+    const _ok=await saveItem(col,item,data); closeModal(); renderMain(); toast(_ok?'บันทึกแล้ว ✓':'⚠️ บันทึกใน memory เท่านั้น รีเฟรชแล้วหาย!',!_ok);
   };
 }
 // ผูกการอัปโหลดไฟล์เอกสารกับช่อง fl_file
@@ -2300,7 +2316,7 @@ function newsForm(col,item){
       data={type:'manual', title:$('#nw_title').value.trim(), date:$('#nw_date').value,
         body:$('#nw_body').value.trim(), image:$('#nw_img').value.trim()};
     }
-    await saveItem(col,item,data); closeModal(); renderMain(); toast('บันทึกแล้ว');
+    const _ok=await saveItem(col,item,data); closeModal(); renderMain(); toast(_ok?'บันทึกแล้ว ✓':'⚠️ บันทึกใน memory เท่านั้น รีเฟรชแล้วหาย!',!_ok);
   };
 }
 /* ----- แก้เนื้อหาอิสระ ----- */
@@ -2315,18 +2331,55 @@ function editContentBlock(path,current){
 }
 
 async function saveItem(col,item,data){
+  const modeBefore=Store.mode;
   if(item){ await Store.updateCol(col,item.id,data); }
   else {
     if(data.createdAt==null) data.createdAt=Date.now();  // เก็บเวลาสร้างไว้ (ใช้กับระบบล้างข้อมูล)
     data.order=-Date.now();                              // ใหม่สุดอยู่บนสุด (เรียงจากน้อย→มาก)
     await Store.addCol(col,data);
   }
+  // คืนค่า true=บันทึก Firestore ได้จริง / false=ตกลง memory เท่านั้น (รีเฟรชแล้วหาย)
+  return Store.mode==='firestore' || modeBefore==='memory';
 }
-function confirmDel(col,id){
-  openModal('ยืนยันการลบ',`<p>ต้องการลบรายการนี้ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้</p>`,
+function confirmDel(col,id,item){
+  const driveIds=collectDriveIds(item);
+  const canDelDrive=driveIds.length>0 && !!SITE.gasUploadUrl;
+  const driveOpt=canDelDrive
+    ? `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:14px;padding:10px 12px;
+         background:rgba(192,57,43,.07);border:1px solid rgba(192,57,43,.25);border-radius:10px;cursor:pointer">
+         <input type="checkbox" id="delDrive" style="margin-top:3px;width:auto">
+         <span style="font-size:14px">ลบไฟล์ใน Google Drive ด้วย (${driveIds.length} ไฟล์)
+           <br><span style="color:#c0392b;font-size:12px;font-weight:600">⚠️ ลบถาวร กู้คืนไม่ได้ (ไม่ไปถังขยะ)</span>
+           <br><span style="color:var(--muted);font-size:12px">ถ้าไม่ติ๊ก ไฟล์จะยังค้างอยู่ใน Drive</span></span>
+       </label>`
+    : '';
+  openModal('ยืนยันการลบ',
+    `<p>ต้องการลบรายการนี้ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้</p>${driveOpt}`,
     `<button class="btn ghost" onclick="closeModal()">ยกเลิก</button>
      <button class="btn primary" id="doDel" style="background:#c0392b">ลบ</button>`);
-  $('#doDel').onclick=async()=>{ await Store.removeCol(col,id); closeModal(); renderMain(); toast('ลบแล้ว'); };
+  $('#doDel').onclick=async()=>{
+    const alsoDrive=canDelDrive && $('#delDrive') && $('#delDrive').checked;
+    closeModal();
+    if(alsoDrive){
+      showUploading('กำลังลบไฟล์ใน Google Drive…');
+      let ok=0, trashedOnly=0;
+      try{ for(let i=0;i<driveIds.length;i++){
+        setUploading('กำลังลบไฟล์ '+(i+1)+'/'+driveIds.length+'…');
+        const res=await gasDeleteFile(driveIds[i]);
+        if(res&&res.deleted){ ok++; if(!res.permanent) trashedOnly++; }
+      } } finally { hideUploading(); }
+      await Store.removeCol(col,id); renderMain();
+      if(ok!==driveIds.length){
+        toast('ลบรายการแล้ว แต่ลบไฟล์ Drive ได้ '+ok+'/'+driveIds.length+' — ตรวจว่าอัปเดต/Deploy โค้ด GAS รองรับการลบหรือยัง', true);
+      }else if(trashedOnly>0){
+        toast('ลบรายการแล้ว + ไฟล์ '+ok+' ไฟล์ลงถังขยะ (ยังไม่ถาวร) — เปิด Advanced Drive Service ใน GAS เพื่อให้ลบถาวร', true);
+      }else{
+        toast('ลบแล้ว + ลบไฟล์ Drive ถาวร '+ok+' ไฟล์ ✓');
+      }
+    }else{
+      await Store.removeCol(col,id); renderMain(); toast('ลบแล้ว');
+    }
+  };
 }
 
 /* ============================================================
@@ -2793,8 +2846,9 @@ function bindSidebar(){
   const fo=$('#sb_font'); if(fo)fo.onchange=()=>{loadFont(fo.value);applySidebarLive();};
   const hb=$('#sb_hbright'); if(hb)hb.oninput=()=>{const v=$('#sb_hbright_v'); if(v)v.textContent=hb.value+'%'; applySidebarLive();};
   const hsx=$('#sb_headersys'); if(hsx)hsx.onchange=applySidebarLive;
-  // ช่องรูป: อัปโหลด + พิมพ์ลิงก์เองก็พรีวิวสด
-  ['sb_logo','sb_cover','sb_header'].forEach(id=>{ bindUpload(id); const e=$('#'+id); if(e)e.oninput=applySidebarLive; });
+  // ช่องรูป: อัปโหลด + พิมพ์ลิงก์เองก็พรีวิวสด — ใช้ prefix แยกชนิด (โลโก้/ปก/Header)
+  const _imgPfx={sb_logo:'โลโก้', sb_cover:'ปก', sb_header:'Header'};
+  ['sb_logo','sb_cover','sb_header'].forEach(id=>{ bindUpload(id,_imgPfx[id]); const e=$('#'+id); if(e)e.oninput=applySidebarLive; });
   // แท็บ
   sb.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>moveTab(b.dataset.id, b.dataset.mv==='up'?-1:1));
   sb.querySelectorAll('[data-ren]').forEach(inp=>inp.onchange=()=>renameTab(inp.dataset.ren,inp.value));
@@ -2952,19 +3006,38 @@ function hideUploading(){ UP_COUNT=Math.max(0,UP_COUNT-1); if(UP_COUNT===0)$('#u
 //   2) GAS อัปโหลดไฟล์ + จดลิงก์ไว้ใน CacheService โดยอ้างด้วย key
 //   3) frontend วน GET ดึงลิงก์กลับด้วย key เดิม (GET ข้าม origin อ่านได้ปกติ)
 //   คืนค่า object {id?, url?} หรือ null
-async function gasUploadRaw(file, folderId, label){
+// ★ ตัดอักขระที่ใช้ในชื่อไฟล์ Drive ไม่ได้ ( / \ : * ? " < > | ) แล้วยุบช่องว่างซ้ำ
+function safePrefix(s){ return String(s||'').replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,' ').trim(); }
+
+// ★ ประกอบชื่อไฟล์ที่มี prefix หมวดหมู่ — รูปแบบ "prefix_ชื่อไฟล์.pdf"
+//   กันการเติม prefix ซ้ำ ถ้าชื่อไฟล์เริ่มต้นด้วย "prefix_" อยู่แล้ว
+function makePrefixedName(prefixWord, originalName){
+  const safe=safePrefix(prefixWord);
+  if(!safe) return originalName;
+  if(originalName.indexOf(safe+'_')===0) return originalName;
+  return safe+'_'+originalName;
+}
+
+// ★ ชื่อไฟล์ที่มี prefix เป็น "ชื่อแท็บ" ที่กำลังเปิดอยู่ (ใช้กับเนื้อหาในแท็บ)
+function tabPrefixName(originalName){
+  const t=(activeTab&&activeTab.title)?activeTab.title:'หน้าหลัก';
+  return makePrefixedName(t, originalName);
+}
+
+async function gasUploadRaw(file, folderId, label, filenameOverride){
   if(!SITE.gasUploadUrl){ toast('ยังไม่ตั้งค่าการอัปโหลด (Apps Script URL)'); return null; }
   if(!folderId){ toast('ยังไม่ตั้งค่าโฟลเดอร์ Drive'); return null; }
   showUploading(label||'กำลังอัปโหลด…');
   try{
     const data=await toBase64(file);
+    const fname=filenameOverride||file.name;   // ชื่อที่จะบันทึกจริงใน Drive (อาจมี prefix แท็บ)
     const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID()
               :(Date.now().toString(36)+Math.random().toString(36).slice(2));
     // (1) ส่งไฟล์ — no-cors จึงไม่ต้องอ่าน response (กันปัญหา CORS ใน iframe Google Sites)
     try{
       await fetch(SITE.gasUploadUrl,{method:'POST',mode:'no-cors',
         headers:{'Content-Type':'text/plain;charset=utf-8'},
-        body:JSON.stringify({key,filename:file.name,mimeType:file.type,data,folderId})});
+        body:JSON.stringify({key,filename:fname,mimeType:file.type,data,folderId})});
     }catch(e){ /* no-cors โดยปกติไม่ throw */ }
     // (2) วนอ่านลิงก์กลับจาก GAS ด้วย key (สูงสุด ~22 วินาที)
     for(let i=0;i<18;i++){
@@ -2981,8 +3054,10 @@ async function gasUploadRaw(file, folderId, label){
 }
 
 // อัปโหลด "รูปภาพ" -> คืนลิงก์ thumbnail ที่เสถียร
-async function uploadImage(file,label){
-  const j=await gasUploadRaw(file, SITE.driveFolderId, label||'กำลังอัปโหลดรูป…');
+//   prefixWord (ไม่บังคับ): ถ้าใส่ จะใช้เป็น prefix แทนชื่อแท็บ (เช่น โลโก้/ปก/Header)
+async function uploadImage(file,label,prefixWord){
+  const fname = prefixWord ? makePrefixedName(prefixWord, file.name) : tabPrefixName(file.name);
+  const j=await gasUploadRaw(file, SITE.driveFolderId, label||'กำลังอัปโหลดรูป…', fname);
   if(!j){ toast('อัปโหลดช้า/ล้มเหลว — ลองใหม่ หรือวางลิงก์รูปเอง'); return null; }
   const id=j.id||driveImgId(j.url||'');
   if(id) return 'https://drive.google.com/thumbnail?id='+id+'&sz=w1600';
@@ -2993,11 +3068,51 @@ async function uploadImage(file,label){
 // ใช้โฟลเดอร์เอกสารแยก (docFolderId) ถ้าเว้นว่างจะใช้โฟลเดอร์รูปแทน
 async function uploadDoc(file){
   const folder=SITE.docFolderId||SITE.driveFolderId;
-  const j=await gasUploadRaw(file, folder, 'กำลังอัปโหลดไฟล์…');
+  const prefixed=tabPrefixName(file.name);
+  const j=await gasUploadRaw(file, folder, 'กำลังอัปโหลดไฟล์…', prefixed);
   if(!j){ toast('อัปโหลดไฟล์ช้า/ล้มเหลว — ลองใหม่อีกครั้ง'); return null; }
   const id=j.id||driveImgId(j.url||'');   // ดึง File ID จากลิงก์ที่ GAS ส่งกลับ (ไม่ต้องแก้ GAS)
-  if(id) return {id, name:file.name, size:file.size||0, type:file.type||''};
+  if(id) return {id, name:prefixed, size:file.size||0, type:file.type||''};
   toast('อัปโหลดไฟล์ล้มเหลว'); return null;
+}
+
+// ★ รวบรวม File ID ใน Google Drive ทั้งหมดจากรายการหนึ่งๆ (เพื่อใช้ลบไฟล์ตอนลบเนื้อหา)
+//   ครอบคลุม: ไฟล์เอกสาร (fileId), รูปเดียว (photo), อัลบั้ม (photos[]), การ์ด (cards[].photo)
+function collectDriveIds(it){
+  if(!it) return [];
+  const ids=new Set();
+  const add=u=>{ const id=driveImgId(u||''); if(id) ids.add(id); };
+  if(it.fileId) ids.add(it.fileId);
+  add(it.photo);
+  (it.photos||[]).forEach(add);
+  (it.cards||[]).forEach(c=>add(c&&c.photo));
+  return [...ids];
+}
+
+// ★ สั่ง GAS ลบไฟล์ใน Drive ตาม fileId (วน GET อ่านผลกลับด้วย key เหมือนตอนอัปโหลด)
+//   ต้องอัปเดตโค้ด GAS ให้รองรับ action:"delete" (ดูภาคผนวก ก ท้ายไฟล์)
+//   คืนค่า {deleted:bool, permanent:bool} หรือ null ถ้าล้มเหลว/หมดเวลา
+async function gasDeleteFile(fileId){
+  if(!SITE.gasUploadUrl || !fileId) return null;
+  try{
+    const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID()
+              :(Date.now().toString(36)+Math.random().toString(36).slice(2));
+    try{
+      await fetch(SITE.gasUploadUrl,{method:'POST',mode:'no-cors',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body:JSON.stringify({action:'delete',key,fileId})});
+    }catch(e){}
+    for(let i=0;i<10;i++){
+      await new Promise(r=>setTimeout(r,1000));
+      try{
+        const r=await fetch(SITE.gasUploadUrl+'?key='+encodeURIComponent(key)+'&t='+Date.now());
+        const j=await r.json();
+        if(j&&j.deleted) return j;            // {deleted:true, permanent:true/false}
+        if(j&&j.error){ console.warn('GAS delete error:',j.error); return null; }
+      }catch(e){}
+    }
+  }catch(e){ console.warn('gasDeleteFile fail',e); }
+  return null;
 }
 
 /* ============================================================
@@ -3135,8 +3250,9 @@ function bindEmbeds(scope){
   });
 }
 let toastTimer;
-function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');
-  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2200);}
+function toast(msg,warn){const t=$('#toast');t.textContent=msg;
+  t.classList.toggle('warn',!!warn);t.classList.add('show');
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),warn?5500:2200);}
 
 /* ============================================================
    เริ่มต้นแอป
@@ -3213,6 +3329,34 @@ function authorizeOnce(){
 function doPost(e){
   try{
     var p = JSON.parse(e.postData.contents);
+
+    // ★ คำสั่งลบไฟล์ใน Drive (เรียกจากหน้าเว็บตอนกดลบเนื้อหา + ติ๊กลบไฟล์ Drive)
+    //   ส่ง {action:"delete", key:..., fileId:...} มา -> ลบไฟล์ -> จดผลไว้ใน Cache ด้วย key
+    //   ★★★ ลบ "ถาวร" (กู้คืนไม่ได้) — ต้องเปิด Advanced Drive Service ก่อน:
+    //       ในเอดิเตอร์ Apps Script > เมนูซ้าย "Services (＋)" > เลือก "Drive API" > Add
+    //       ถ้ายังไม่เปิด ระบบจะลงถังขยะแทน (ยังไม่ถาวร) และแจ้งกลับว่า permanent=false
+    if (p.action === 'delete') {
+      var dres = {deleted:false, permanent:false};
+      try {
+        if (typeof Drive !== 'undefined' && Drive.Files && Drive.Files.remove) {
+          Drive.Files.remove(p.fileId);          // ลบถาวร กู้คืนไม่ได้
+          dres.deleted = true; dres.permanent = true;
+        } else {
+          DriveApp.getFileById(p.fileId).setTrashed(true);  // สำรอง: ลงถังขยะ
+          dres.deleted = true; dres.permanent = false;
+        }
+      } catch (delErr) {
+        // เผื่อ Drive.Files.remove โยน error (สิทธิ์/เวอร์ชัน) -> ลองลงถังขยะแทน
+        try {
+          DriveApp.getFileById(p.fileId).setTrashed(true);
+          dres.deleted = true; dres.permanent = false;
+        } catch (e2) { dres.error = String(delErr); }
+      }
+      if (p.key) CacheService.getScriptCache().put('up_' + p.key, JSON.stringify(dres), 21600);
+      return ContentService.createTextOutput(JSON.stringify(dres))
+                           .setMimeType(ContentService.MimeType.JSON);
+    }
+
     var folder = DriveApp.getFolderById(p.folderId);
     var bytes  = Utilities.base64Decode(p.data);
     var blob   = Utilities.newBlob(bytes, p.mimeType, p.filename);
@@ -3287,12 +3431,18 @@ function doGet(e){
     }
   }
 
-  // เดิม: อ่านลิงก์อัปโหลดกลับด้วย key
+  // เดิม: อ่านผลกลับด้วย key — รองรับทั้งผลอัปโหลด (เก็บเป็น URL) และผลลบ (เก็บเป็น JSON)
   var out = {};
   try{
     var key = p.key || '';
     if (key) {
-      out.url = CacheService.getScriptCache().get('up_' + key) || '';
+      var cached = CacheService.getScriptCache().get('up_' + key) || '';
+      if (cached.charAt(0) === '{') {
+        try { out = JSON.parse(cached); }    // ผลลบไฟล์: {deleted:true} หรือ {error:...}
+        catch(parseErr) { out.url = cached; }
+      } else {
+        out.url = cached;                     // ผลอัปโหลด: ลิงก์ thumbnail
+      }
     }
   }catch(err){ out.error = String(err); }
   return ContentService.createTextOutput(JSON.stringify(out))
